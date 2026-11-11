@@ -1,11 +1,13 @@
 # cmd-mod-commit
 
+[![npm version](https://img.shields.io/npm/v/cmd-mod-commit.svg)](https://www.npmjs.com/package/cmd-mod-commit)
+
 A portable Command Code mod. Adds a `/commit` command to any instance.
 
 ## Install
 
 ```bash
-cmd mods add /path/to/cmd-mod-commit -g
+cmd mods add npm:cmd-mod-commit -g
 ```
 
 Then `/reload` (or start a new session).
