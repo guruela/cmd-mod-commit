@@ -2,9 +2,9 @@ import type {ModApi} from '@commandcode/harness';
 
 const MAX_FILES_SHOWN = 200;
 
-type CommitFlags = {style: string; sign: boolean; push: boolean; status: boolean};
+type CommitFlags = {style: string; sign: boolean; push: boolean; status: boolean; shortcut: boolean};
 
-const DEFAULT_FLAGS: CommitFlags = {style: 'conventional', sign: false, push: false, status: true};
+const DEFAULT_FLAGS: CommitFlags = {style: 'conventional', sign: false, push: false, status: true, shortcut: true};
 
 const STORE_KEY = 'flags';
 
@@ -109,7 +109,7 @@ function commitCommandLine(sign: boolean): string {
 }
 
 function flagsSummary(flags: CommitFlags): string {
-	return `style=${flags.style}, sign=${flags.sign ? 'on (-S)' : 'off'}, push=${flags.push ? 'on' : 'off'}, status=${flags.status ? 'on' : 'off'}`;
+	return `style=${flags.style}, sign=${flags.sign ? 'on (-S)' : 'off'}, push=${flags.push ? 'on' : 'off'}, status=${flags.status ? 'on' : 'off'}, shortcut=${flags.shortcut ? 'on (alt+c)' : 'off'}`;
 }
 
 function normalizeStatus(value: unknown): boolean {
@@ -342,6 +342,86 @@ function normalizeBool(value: unknown): boolean | undefined {
 	return undefined;
 }
 
+async function runCommit(opts: {
+	hint: string;
+	cwd: string;
+	exec: (args: {command: string; args: string[]; cwd: string}) => Promise<{stdout: string; stderr: string; code: number}>;
+	flags: CommitFlags;
+}): Promise<{prompt?: string; message?: string}> {
+	const {hint, cwd, exec, flags} = opts;
+	const git = (gitArgs: string[]) => exec({command: 'git', args: gitArgs, cwd});
+
+	if ((await git(['rev-parse', '--is-inside-work-tree'])).code !== 0) {
+		return {
+			prompt: freshRepoPrompt({
+				cwd,
+				changed: [],
+				tracked: [],
+				srcInChanged: false,
+				hint,
+				needsInit: true,
+				flags,
+			}),
+		};
+	}
+
+	const hasCommits = (await git(['rev-parse', '--verify', 'HEAD'])).code === 0;
+	const status = await git(['status', '--porcelain=v1', '-uall']);
+	const staged = fileList((await git(['diff', '--cached', '--name-only'])).stdout);
+	const unstaged = fileList((await git(['diff', '--name-only'])).stdout);
+	const untracked = status.stdout
+		.split('\n')
+		.map(line => line.trim())
+		.filter(line => line.startsWith('??'))
+		.map(line => line.slice(2).trim())
+		.filter(Boolean);
+	const changed = [...new Set([...staged, ...unstaged, ...untracked])];
+
+	if (changed.length === 0) {
+		return {message: 'Nothing to commit — the working tree is clean.'};
+	}
+
+	if (!hasCommits) {
+		const tracked = fileList((await git(['ls-files'])).stdout);
+		const srcInChanged = changed.some(
+			p => p === 'src' || p.toLowerCase().startsWith('src/'),
+		);
+		return {
+			prompt: freshRepoPrompt({
+				cwd,
+				changed,
+				tracked,
+				srcInChanged,
+				hint,
+				needsInit: false,
+				flags,
+			}),
+		};
+	}
+
+	const branch =
+		(await git(['branch', '--show-current'])).stdout.trim() || '(detached HEAD)';
+	const recent =
+		(await git(['log', '--oneline', '-5'])).stdout.trim() || '(no history yet)';
+	const cachedStat = (await git(['diff', '--cached', '--stat'])).stdout.trim();
+	const worktreeStat = (await git(['diff', '--stat'])).stdout.trim();
+
+	return {
+		prompt: existingRepoPrompt({
+			branch,
+			recent,
+			status: status.stdout.trim() || '(clean)',
+			cachedStat,
+			worktreeStat,
+			staged,
+			unstaged,
+			untracked,
+			hint,
+			flags,
+		}),
+	};
+}
+
 export default function (cmd: ModApi): void {
 	cmd.hooks({
 		onSessionStart: () => {
@@ -564,6 +644,10 @@ export default function (cmd: ModApi): void {
 		type: 'boolean',
 		description: 'Show dirty git state in the footer.',
 	});
+	cmd.addFlag('shortcut', {
+		type: 'boolean',
+		description: 'Alt+C shortcut triggers /commit.',
+	});
 
 	const readStored = (): CommitFlags => {
 		const stored = cmd.store.get<Partial<CommitFlags>>(STORE_KEY) ?? {};
@@ -572,6 +656,7 @@ export default function (cmd: ModApi): void {
 			sign: stored.sign === true,
 			push: stored.push === true,
 			status: stored.status !== false,
+			shortcut: stored.shortcut !== false,
 		};
 	};
 
@@ -581,6 +666,7 @@ export default function (cmd: ModApi): void {
 		const optSign = cmd.getFlag('sign');
 		const optPush = cmd.getFlag('push');
 		const optStatus = cmd.getFlag('status');
+		const optShortcut = cmd.getFlag('shortcut');
 		return {
 			style:
 				typeof optStyle === 'string' && optStyle
@@ -589,12 +675,13 @@ export default function (cmd: ModApi): void {
 			sign: typeof optSign === 'boolean' ? optSign : stored.sign,
 			push: typeof optPush === 'boolean' ? optPush : stored.push,
 			status: typeof optStatus === 'boolean' ? optStatus : stored.status,
+			shortcut: typeof optShortcut === 'boolean' ? optShortcut : stored.shortcut,
 		};
 	};
 
 	cmd.addCommand({
 		name: 'commit:flags',
-		description: 'Show and change /commit options (style, sign, push, status)',
+		description: 'Show and change /commit options (style, sign, push, status, shortcut)',
 		argumentHint: '[show|reset|key=value ...]',
 		handler: async ({args, ui}) => {
 			const rest = args.trim();
@@ -608,6 +695,7 @@ export default function (cmd: ModApi): void {
 					`- sign: ${flags.sign ? 'on' : 'off'} (stored: ${stored.sign ? 'on' : 'off'})`,
 					`- push: ${flags.push ? 'on' : 'off'} (stored: ${stored.push ? 'on' : 'off'})`,
 					`- status: ${flags.status ? 'on' : 'off'} (stored: ${stored.status ? 'on' : 'off'})`,
+					`- shortcut: ${flags.shortcut ? 'on' : 'off'} (stored: ${stored.shortcut ? 'on' : 'off'})`,
 				];
 				if (rest === '') {
 					lines.push(
@@ -621,12 +709,13 @@ export default function (cmd: ModApi): void {
 							{label: 'sign', description: `GPG-sign commits (${flags.sign ? 'on' : 'off'}) — select to toggle`},
 							{label: 'push', description: `push after committing (${flags.push ? 'on' : 'off'}) — select to toggle`},
 							{label: 'status', description: `dirty-state footer (${flags.status ? 'on' : 'off'}) — select to toggle`},
+							{label: 'shortcut', description: `alt+c commit shortcut (${flags.shortcut ? 'on' : 'off'}) — select to toggle`},
 							{label: 'reset', description: 'back to defaults'},
 							{label: 'Done'},
 						],
 					});
 					if (pick === undefined || pick === 'Done') {
-						return {message: lines.slice(0, 5).join('\n')};
+						return {message: lines.slice(0, 6).join('\n')};
 					}
 					if (pick === 'style') {
 						const choice = await ui.select({
@@ -640,7 +729,7 @@ export default function (cmd: ModApi): void {
 						await cmd.store.set(STORE_KEY, {...readStored(), style: normalizeStyle(choice)});
 						return {message: `style set to ${normalizeStyle(choice)}.`};
 					}
-					if (pick === 'sign' || pick === 'push' || pick === 'status') {
+					if (pick === 'sign' || pick === 'push' || pick === 'status' || pick === 'shortcut') {
 						const key = pick;
 						const on = !flags[key];
 						await cmd.store.set(STORE_KEY, {...readStored(), [key]: on});
@@ -649,7 +738,7 @@ export default function (cmd: ModApi): void {
 					}
 					await cmd.store.delete(STORE_KEY);
 					await refreshStatus(cmd);
-					return {message: 'Options reset to defaults (conventional, sign off, push off, status on).'};
+					return {message: 'Options reset to defaults (conventional, sign off, push off, status on, shortcut on).'};
 				}
 				return {message: lines.join('\n')};
 			}
@@ -657,7 +746,7 @@ export default function (cmd: ModApi): void {
 			if (rest.toLowerCase() === 'reset') {
 				await cmd.store.delete(STORE_KEY);
 				await refreshStatus(cmd);
-				return {message: 'Options reset to defaults (conventional, sign off, push off, status on).'};
+				return {message: 'Options reset to defaults (conventional, sign off, push off, status on, shortcut on).'};
 			}
 
 			const updates: Partial<CommitFlags> = {};
@@ -671,12 +760,12 @@ export default function (cmd: ModApi): void {
 						return {message: `Unknown style "${value}" — use conventional or gitmoji.`};
 					}
 					updates.style = normalizeStyle(value);
-				} else if (key === 'sign' || key === 'push' || key === 'status') {
+				} else if (key === 'sign' || key === 'push' || key === 'status' || key === 'shortcut') {
 					const b = normalizeBool(value);
 					if (b === undefined) return {message: `Unknown value "${value}" for ${key} — use true or false.`};
 					updates[key] = b;
 				} else {
-					return {message: `Unknown option "${key}" — options are style, sign, push, status.`};
+					return {message: `Unknown option "${key}" — options are style, sign, push, status, shortcut.`};
 				}
 			}
 			await cmd.store.set(STORE_KEY, {...readStored(), ...updates});
@@ -690,79 +779,15 @@ export default function (cmd: ModApi): void {
 		description: 'Commit working changes in small incremental stages with Commitizen-style messages',
 		argumentHint: '[message]',
 		handler: async ({args, cwd, exec}) => {
-			const flags = readFlags();
-			const git = (gitArgs: string[]) => exec({command: 'git', args: gitArgs, cwd});
-			const hint = args.trim();
+			return runCommit({hint: args.trim(), cwd, exec, flags: readFlags()});
+		},
+	});
 
-			if ((await git(['rev-parse', '--is-inside-work-tree'])).code !== 0) {
-				return {
-					prompt: freshRepoPrompt({
-						cwd,
-						changed: [],
-						tracked: [],
-						srcInChanged: false,
-						hint,
-						needsInit: true,
-						flags,
-					}),
-				};
-			}
-
-			const hasCommits = (await git(['rev-parse', '--verify', 'HEAD'])).code === 0;
-			const status = await git(['status', '--porcelain=v1', '-uall']);
-			const staged = fileList((await git(['diff', '--cached', '--name-only'])).stdout);
-			const unstaged = fileList((await git(['diff', '--name-only'])).stdout);
-			const untracked = status.stdout
-				.split('\n')
-				.map(line => line.trim())
-				.filter(line => line.startsWith('??'))
-				.map(line => line.slice(2).trim())
-				.filter(Boolean);
-			const changed = [...new Set([...staged, ...unstaged, ...untracked])];
-
-			if (changed.length === 0) {
-				return {message: 'Nothing to commit — the working tree is clean.'};
-			}
-
-			if (!hasCommits) {
-				const tracked = fileList((await git(['ls-files'])).stdout);
-				const srcInChanged = changed.some(
-					p => p === 'src' || p.toLowerCase().startsWith('src/'),
-				);
-				return {
-					prompt: freshRepoPrompt({
-						cwd,
-						changed,
-						tracked,
-						srcInChanged,
-						hint,
-						needsInit: false,
-						flags,
-					}),
-				};
-			}
-
-			const branch =
-				(await git(['branch', '--show-current'])).stdout.trim() || '(detached HEAD)';
-			const recent =
-				(await git(['log', '--oneline', '-5'])).stdout.trim() || '(no history yet)';
-			const cachedStat = (await git(['diff', '--cached', '--stat'])).stdout.trim();
-			const worktreeStat = (await git(['diff', '--stat'])).stdout.trim();
-
-			return {
-				prompt: existingRepoPrompt({
-					branch,
-					recent,
-					status: status.stdout.trim() || '(clean)',
-					cachedStat,
-					worktreeStat,
-					staged,
-					unstaged,
-					untracked,
-					hint,
-					flags,
-				}),
-			};
+	cmd.addShortcut('alt+c', {
+		description: 'Trigger /commit',
+		handler: async ({cwd, exec}) => {
+			if (!readFlags().shortcut) return undefined;
+			return runCommit({hint: '', cwd, exec, flags: readFlags()});
 		},
 	});
 }
