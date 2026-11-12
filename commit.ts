@@ -2,9 +2,9 @@ import type {ModApi} from '@commandcode/harness';
 
 const MAX_FILES_SHOWN = 200;
 
-type CommitFlags = {style: string; sign: boolean; push: boolean};
+type CommitFlags = {style: string; sign: boolean; push: boolean; status: boolean};
 
-const DEFAULT_FLAGS: CommitFlags = {style: 'conventional', sign: false, push: false};
+const DEFAULT_FLAGS: CommitFlags = {style: 'conventional', sign: false, push: false, status: true};
 
 const STORE_KEY = 'flags';
 
@@ -109,7 +109,111 @@ function commitCommandLine(sign: boolean): string {
 }
 
 function flagsSummary(flags: CommitFlags): string {
-	return `style=${flags.style}, sign=${flags.sign ? 'on (-S)' : 'off'}, push=${flags.push ? 'on' : 'off'}`;
+	return `style=${flags.style}, sign=${flags.sign ? 'on (-S)' : 'off'}, push=${flags.push ? 'on' : 'off'}, status=${flags.status ? 'on' : 'off'}`;
+}
+
+function normalizeStatus(value: unknown): boolean {
+	if (typeof value === 'boolean') return value;
+	return DEFAULT_FLAGS.status;
+}
+
+async function dirtyStatus(cmd: ModApi, cwd?: string): Promise<string | null> {
+	let out;
+	try {
+		out = await cmd.exec({command: 'git', args: ['status', '--porcelain=v1', '-b', '-uall'], cwd});
+	} catch {
+		return null;
+	}
+	if (out.code !== 0) return null;
+	const lines = out.stdout
+		.split('\n')
+		.map(l => l.trimEnd())
+		.filter(l => l.trim() !== '');
+	const header = lines.find(l => l.startsWith('##')) ?? '';
+	const files = lines
+		.filter(l => !l.startsWith('##'))
+		.map(l => {
+			const rest = l.length > 3 ? l.slice(3).trim() : '';
+			const arrow = rest.indexOf(' -> ');
+			return arrow >= 0 ? rest.slice(arrow + 4).trim() : rest;
+		})
+		.filter(Boolean);
+
+	let ahead = 0;
+	let behind = 0;
+	let hasUpstream = false;
+	const bracket = header.match(/\[(.+)\]/);
+	if (bracket) {
+		const inside = bracket[1] ?? '';
+		if (!/gone/.test(inside)) {
+			hasUpstream = true;
+			const a = inside.match(/ahead (\d+)/);
+			const b = inside.match(/behind (\d+)/);
+			if (a) ahead = Number.parseInt(a[1] ?? '0', 10) || 0;
+			if (b) behind = Number.parseInt(b[1] ?? '0', 10) || 0;
+		}
+	} else if (header.includes('...')) {
+		hasUpstream = true;
+	}
+	if (hasUpstream && ahead === 0 && behind === 0 && header.includes('...')) {
+		try {
+			const c = await cmd.exec({command: 'git', args: ['rev-list', '--left-right', '--count', 'HEAD...@{u}'], cwd});
+			if (c.code === 0) {
+				const [aStr, bStr] = c.stdout.trim().split(/\s+/);
+				ahead = Number.parseInt(aStr ?? '0', 10) || 0;
+				behind = Number.parseInt(bStr ?? '0', 10) || 0;
+			} else {
+				hasUpstream = false;
+			}
+		} catch {
+			hasUpstream = false;
+		}
+	}
+
+	let branch = '';
+	try {
+		const b = await cmd.exec({command: 'git', args: ['branch', '--show-current'], cwd});
+		if (b.code === 0 && b.stdout.trim()) branch = b.stdout.trim();
+	} catch {
+		branch = '';
+	}
+	if (!branch) {
+		const h = header.replace(/^##\s*/, '');
+		branch = h.split('...')[0]?.trim() || h.trim() || '(detached)';
+	}
+
+	const shown = files.slice(0, 3);
+	const restCount = files.length - shown.length;
+	const filePart =
+		files.length > 0 ? ` ● ${files.length} ${shown.join(', ')}${restCount > 0 ? ` +${restCount} more` : ''}` : '';
+	let syncPart = '';
+	if (hasUpstream) {
+		if (ahead > 0 && behind > 0) syncPart = ` ↑${ahead} ↓${behind}`;
+		else if (ahead > 0) syncPart = ` ↑${ahead}`;
+		else if (behind > 0) syncPart = ` ↓${behind}`;
+		else syncPart = ' =';
+	}
+
+	return ` ${branch}${filePart}${syncPart}`.trim();
+}
+
+async function refreshStatus(cmd: ModApi): Promise<void> {
+	const stored = cmd.store.get<Partial<CommitFlags>>(STORE_KEY) ?? {};
+	const opt = cmd.getFlag('status');
+	if (typeof opt === 'boolean' ? !opt : stored.status === false) {
+		cmd.ui.setStatus(null);
+		return;
+	}
+	const text = await dirtyStatus(cmd);
+	cmd.ui.setStatus(text);
+}
+
+// The host swallows publishes made before the TUI subscribes (mid-bind), so the first
+// paint is deferred until after bind settles; afterToolCall refreshes keep it current.
+function refreshStatusDeferred(cmd: ModApi): void {
+	cmd.clock.after(600, () => {
+		void refreshStatus(cmd);
+	});
 }
 
 function czRules(flags: CommitFlags): string[] {
@@ -240,6 +344,16 @@ function normalizeBool(value: unknown): boolean | undefined {
 
 export default function (cmd: ModApi): void {
 	cmd.hooks({
+		onSessionStart: () => {
+			refreshStatusDeferred(cmd);
+		},
+		onSessionEnd: () => {
+			cmd.ui.setStatus(null);
+		},
+		afterToolCall: () => {
+			void refreshStatus(cmd);
+			return undefined;
+		},
 		beforeToolCall: async ({toolName, input}) => {
 			if (toolName !== 'shell_command') return undefined;
 			const full =
@@ -446,6 +560,10 @@ export default function (cmd: ModApi): void {
 		type: 'boolean',
 		description: 'Push the branch after committing.',
 	});
+	cmd.addFlag('status', {
+		type: 'boolean',
+		description: 'Show dirty git state in the footer.',
+	});
 
 	const readStored = (): CommitFlags => {
 		const stored = cmd.store.get<Partial<CommitFlags>>(STORE_KEY) ?? {};
@@ -453,6 +571,7 @@ export default function (cmd: ModApi): void {
 			style: normalizeStyle(stored.style),
 			sign: stored.sign === true,
 			push: stored.push === true,
+			status: stored.status !== false,
 		};
 	};
 
@@ -461,6 +580,7 @@ export default function (cmd: ModApi): void {
 		const optStyle = cmd.getFlag('style');
 		const optSign = cmd.getFlag('sign');
 		const optPush = cmd.getFlag('push');
+		const optStatus = cmd.getFlag('status');
 		return {
 			style:
 				typeof optStyle === 'string' && optStyle
@@ -468,12 +588,13 @@ export default function (cmd: ModApi): void {
 					: stored.style,
 			sign: typeof optSign === 'boolean' ? optSign : stored.sign,
 			push: typeof optPush === 'boolean' ? optPush : stored.push,
+			status: typeof optStatus === 'boolean' ? optStatus : stored.status,
 		};
 	};
 
 	cmd.addCommand({
 		name: 'commit:flags',
-		description: 'Show and change /commit options (style, sign, push)',
+		description: 'Show and change /commit options (style, sign, push, status)',
 		argumentHint: '[show|reset|key=value ...]',
 		handler: async ({args, ui}) => {
 			const rest = args.trim();
@@ -486,6 +607,7 @@ export default function (cmd: ModApi): void {
 					`- style: ${flags.style} (stored: ${stored.style})`,
 					`- sign: ${flags.sign ? 'on' : 'off'} (stored: ${stored.sign ? 'on' : 'off'})`,
 					`- push: ${flags.push ? 'on' : 'off'} (stored: ${stored.push ? 'on' : 'off'})`,
+					`- status: ${flags.status ? 'on' : 'off'} (stored: ${stored.status ? 'on' : 'off'})`,
 				];
 				if (rest === '') {
 					lines.push(
@@ -498,12 +620,13 @@ export default function (cmd: ModApi): void {
 							{label: 'style', description: `message style (${flags.style})`},
 							{label: 'sign', description: `GPG-sign commits (${flags.sign ? 'on' : 'off'}) — select to toggle`},
 							{label: 'push', description: `push after committing (${flags.push ? 'on' : 'off'}) — select to toggle`},
+							{label: 'status', description: `dirty-state footer (${flags.status ? 'on' : 'off'}) — select to toggle`},
 							{label: 'reset', description: 'back to defaults'},
 							{label: 'Done'},
 						],
 					});
 					if (pick === undefined || pick === 'Done') {
-						return {message: lines.slice(0, 4).join('\n')};
+						return {message: lines.slice(0, 5).join('\n')};
 					}
 					if (pick === 'style') {
 						const choice = await ui.select({
@@ -517,21 +640,24 @@ export default function (cmd: ModApi): void {
 						await cmd.store.set(STORE_KEY, {...readStored(), style: normalizeStyle(choice)});
 						return {message: `style set to ${normalizeStyle(choice)}.`};
 					}
-					if (pick === 'sign' || pick === 'push') {
+					if (pick === 'sign' || pick === 'push' || pick === 'status') {
 						const key = pick;
 						const on = !flags[key];
 						await cmd.store.set(STORE_KEY, {...readStored(), [key]: on});
+						if (key === 'status') await refreshStatus(cmd);
 						return {message: `${key} turned ${on ? 'on' : 'off'}.`};
 					}
 					await cmd.store.delete(STORE_KEY);
-					return {message: 'Options reset to defaults (conventional, sign off, push off).'};
+					await refreshStatus(cmd);
+					return {message: 'Options reset to defaults (conventional, sign off, push off, status on).'};
 				}
 				return {message: lines.join('\n')};
 			}
 
 			if (rest.toLowerCase() === 'reset') {
 				await cmd.store.delete(STORE_KEY);
-				return {message: 'Options reset to defaults (conventional, sign off, push off).'};
+				await refreshStatus(cmd);
+				return {message: 'Options reset to defaults (conventional, sign off, push off, status on).'};
 			}
 
 			const updates: Partial<CommitFlags> = {};
@@ -545,15 +671,16 @@ export default function (cmd: ModApi): void {
 						return {message: `Unknown style "${value}" — use conventional or gitmoji.`};
 					}
 					updates.style = normalizeStyle(value);
-				} else if (key === 'sign' || key === 'push') {
+				} else if (key === 'sign' || key === 'push' || key === 'status') {
 					const b = normalizeBool(value);
 					if (b === undefined) return {message: `Unknown value "${value}" for ${key} — use true or false.`};
 					updates[key] = b;
 				} else {
-					return {message: `Unknown option "${key}" — options are style, sign, push.`};
+					return {message: `Unknown option "${key}" — options are style, sign, push, status.`};
 				}
 			}
 			await cmd.store.set(STORE_KEY, {...readStored(), ...updates});
+			if (updates.status !== undefined) await refreshStatus(cmd);
 			return {message: `Saved: ${flagsSummary({...readFlags(), ...updates})}.`};
 		},
 	});
