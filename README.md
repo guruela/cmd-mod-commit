@@ -102,7 +102,20 @@ cd cmd-mod-commit
 cmd mods add ./cmd-mod-commit   # use the checkout where it is
 ```
 
-Then `/reload` (or start a new session) to pick up changes. Edit
-`commit.ts`, reload, and test directly. Typecheck with
+Then `/reload` (or start a new session) to pick up changes. Edit the
+sources under `src/`, reload, and test directly. Typecheck with
 `tsc --noEmit --skipLibCheck` (the `@commandcode/harness` types only exist
 inside the host, so expect an unresolved-module error outside it).
+
+### Layout
+
+| File              | Contents                                                     |
+| ----------------- | ------------------------------------------------------------ |
+| `src/index.ts`    | Mod entry point: hooks, flag registration, wiring.           |
+| `src/flags.ts`    | `CommitFlags` type, defaults, store read/write helpers.      |
+| `src/git.ts`      | Git command parsing, path filtering, file-list helpers.      |
+| `src/prompts.ts`  | Commitizen prompt builders and `/commit` message formatting. |
+| `src/status.ts`   | Footer status segment (branch, dirty files, sync state).     |
+| `src/guardrails.ts` | Destructive-command confirmations and secrets blocking.    |
+| `src/commit.ts`   | `runCommit` flow shared by `/commit` and the `alt+c` shortcut.|
+| `src/commands.ts` | `/commit` and `/commit:flags` commands plus the shortcut.    |
