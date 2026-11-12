@@ -5,6 +5,6 @@
 	"keywords": ["cmd-mod", "cmd-mod-command"],
 	"repository": {"type": "git", "url": "https://github.com/guruela/cmd-mod-commit"},
 	"commandcode": {
-		"mods": ["./commit.ts"]
+		"mods": ["./src/index.ts"]
 	}
 }
