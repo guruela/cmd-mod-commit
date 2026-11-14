@@ -1,6 +1,6 @@
 # cmd-mod-commit
 
-[![npm version](https://img.shields.io/npm/v/cmd-mod-commit.svg)](https://www.npmjs.com/package/cmd-mod-commit)
+[![npm version](https://img.shields.io/npm/v/cmd-mod-commit.svg)](https://www.npmjs.com/package/cmd-mod-commit) [![npm total downloads](https://img.shields.io/npm/dt/cmd-mod-commit)](https://www.npmjs.com/package/cmd-mod-commit)
 
 A portable Command Code mod for git commits. Adds a `/commit` command to any instance.
 
