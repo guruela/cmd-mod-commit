@@ -1,6 +1,7 @@
 import type {ModApi} from '@commandcode/harness';
 import {registerCommands} from './commands.js';
 import {registerGuardrails} from './guardrails.js';
+import {registerPane} from './pane.js';
 import {registerTool} from './tool.js';
 import {refreshStatus, refreshStatusDeferred} from './status.js';
 
@@ -20,6 +21,7 @@ export default function (cmd: ModApi): void {
 
 	registerGuardrails(cmd);
 	registerTool(cmd);
+	registerPane(cmd);
 
 	cmd.addFlag('style', {
 		type: 'string',

@@ -42,14 +42,16 @@ The mod also registers a `commit` tool, so agents can run the same flow when
 you ask them to commit mid-conversation ("commit this", "commit my
 changes"). It takes an optional `message` hint (used as the first commit
 message in a fresh repo, skipping the initial-commit question) and returns
-the same instructions the `/commit` command produces. The `/commit:flags`
+the same instructions the `/commit` command produces. The `/commit:config`
 options apply, and the guardrails hold no matter who runs the git commands.
 
-## Options (`/commit:flags`)
+## Options (`/commit:config`)
 
-Run `/commit:flags` with no args for an interactive picker, `show` for a
-readout, `reset` for defaults, or `key=value` pairs (e.g.
-`/commit:flags style=gitmoji sign=true`).
+Run `/commit:config` for a settings panel — a pane that stays open while you
+flip options (arrow keys or Tab to move between settings, Enter to change
+one, `esc` or `alt+0` closes it). `show` prints a readout, `reset` restores
+defaults, and `key=value` pairs (e.g. `/commit:config style=gitmoji
+sign=true`) change options right from the prompt.
 
 | Option     | Default        | What it does                                              |
 | ---------- | -------------- | --------------------------------------------------------- |
@@ -64,12 +66,12 @@ readout, `reset` for defaults, or `key=value` pairs (e.g.
 A persistent segment in the TUI status row shows the current branch,
 dirty files (count plus the first few names), and upstream sync state
 (`↑n` ahead, `↓n` behind, `=` in sync). It refreshes after every tool
-call. Toggle it with the `status` option in `/commit:flags`.
+call. Toggle it with the `status` option in `/commit:config`.
 
 ## Keyboard shortcut
 
 Press `alt+c` (Option+C on macOS) anywhere in the TUI to trigger `/commit`.
-Toggle it with the `shortcut` option in `/commit:flags`. Listed under
+Toggle it with the `shortcut` option in `/commit:config`. Listed under
 **Mods** in `/hotkeys`.
 
 ## Guardrails
@@ -129,4 +131,5 @@ inside the host, so expect an unresolved-module error outside it).
 | `src/guardrails.ts` | Destructive-command confirmations and secrets blocking.    |
 | `src/commit.ts`   | `runCommit` flow shared by `/commit`, the `alt+c` shortcut, and the agent tool. |
 | `src/tool.ts`     | The `commit` tool the model can call when asked to commit.   |
-| `src/commands.ts` | `/commit` and `/commit:flags` commands plus the shortcut.    |
+| `src/pane.ts`     | The `/commit:config` settings pane: style select, toggles, reset. |
+| `src/commands.ts` | `/commit` and `/commit:config` commands plus the shortcut.    |
