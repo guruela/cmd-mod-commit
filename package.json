@@ -1,10 +1,18 @@
 {
-	"name": "cmd-mod-commit",
-	"version": "0.2.0",
-	"description": "Adds a /commit command that commits in small incremental stages with Commitizen-style messages, starting from 'initial commit'.",
-	"keywords": ["cmd-mod", "cmd-mod-command"],
-	"repository": {"type": "git", "url": "https://github.com/guruela/cmd-mod-commit"},
-	"commandcode": {
-		"mods": ["./src/index.ts"]
-	}
+  "name": "cmd-mod-commit",
+  "version": "0.3.0",
+  "description": "Adds a /commit command that commits in small incremental stages with Commitizen-style messages, starting from 'initial commit'.",
+  "keywords": [
+    "cmd-mod",
+    "cmd-mod-command"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guruela/cmd-mod-commit"
+  },
+  "commandcode": {
+    "mods": [
+      "./src/index.ts"
+    ]
+  }
 }
