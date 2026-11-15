@@ -62,7 +62,7 @@ export function freshRepoPrompt(opts: {
 		'Whether anything beyond config/scaffolding exists you decide yourself: look at the tree and infer it from names and contents, not from a fixed list. Config/scaffolding means things like manifests, lockfiles, editor/CI/build/lint configs, Dockerfiles, .gitignore. Everything with real substance — application code, assets, scripts that do work, meaningful docs — counts as project content.',
 		'',
 	];
-	if (opts.hint) lines.push(`The user ran /commit with a hint — use it as the first message and skip asking: ${opts.hint}`, '');
+	if (opts.hint) lines.push(`The user asked for a commit with a hint — use it as the first message and skip asking: ${opts.hint}`, '');
 	lines.push(
 		'Steps:',
 		"1. If there is real project content (src/ or any non-config files), ask the user whether to keep the default first message 'initial commit' or use a custom one. If you cannot reach the user, keep 'initial commit' and proceed.",

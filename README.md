@@ -35,6 +35,15 @@ trailer).
    on. Handles the "forgot to commit for a while" case without one giant
    commit.
 
+## Agent tool
+
+The mod also registers a `commit` tool, so agents can run the same flow when
+you ask them to commit mid-conversation ("commit this", "commit my
+changes"). It takes an optional `message` hint (used as the first commit
+message in a fresh repo, skipping the initial-commit question) and returns
+the same instructions the `/commit` command produces. The `/commit:flags`
+options apply, and the guardrails hold no matter who runs the git commands.
+
 ## Options (`/commit:flags`)
 
 Run `/commit:flags` with no args for an interactive picker, `show` for a
@@ -117,5 +126,6 @@ inside the host, so expect an unresolved-module error outside it).
 | `src/prompts.ts`  | Commitizen prompt builders and `/commit` message formatting. |
 | `src/status.ts`   | Footer status segment (branch, dirty files, sync state).     |
 | `src/guardrails.ts` | Destructive-command confirmations and secrets blocking.    |
-| `src/commit.ts`   | `runCommit` flow shared by `/commit` and the `alt+c` shortcut.|
+| `src/commit.ts`   | `runCommit` flow shared by `/commit`, the `alt+c` shortcut, and the agent tool. |
+| `src/tool.ts`     | The `commit` tool the model can call when asked to commit.   |
 | `src/commands.ts` | `/commit` and `/commit:flags` commands plus the shortcut.    |
