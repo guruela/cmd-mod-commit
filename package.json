@@ -1,6 +1,6 @@
 {
   "name": "cmd-mod-commit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Adds a /commit command that commits in small incremental stages with Commitizen-style messages, starting from 'initial commit'.",
   "keywords": [
     "cmd-mod",
